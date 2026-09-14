@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "node -e \"console.log('JARVIS Web build completed successfully for Vercel deployment')\"",
+    "build": "node build-web.js",
     "build:electron": "electron-builder"
   },
   "author": "Elango",
