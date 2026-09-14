@@ -105,41 +105,60 @@ let server;
 
 const cors = require('cors');
 
-function startLocalServer() {
-  const app = express();
-  const port = 3000;
+let activePort = 3000;
 
-  // Restrict CORS to localhost only
-  app.use(cors({
-    origin: (origin, callback) => {
-      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
-        callback(null, true);
-      } else {
-        callback(new Error('Blocked by CORS'));
+function startLocalServer(preferredPort = 3000) {
+  return new Promise((resolve) => {
+    const app = express();
+
+    // Restrict CORS to localhost only
+    app.use(cors({
+      origin: (origin, callback) => {
+        if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+          callback(null, true);
+        } else {
+          callback(new Error('Blocked by CORS'));
+        }
       }
-    }
-  }));
+    }));
 
-  // Block access to sensitive files (.env, credentials, source code, configs)
-  app.use((req, res, next) => {
-    const rawPath = (req.path || '').toLowerCase();
-    const blockedPatterns = ['.env', '.git', '.lock', '.json', '.py', 'main.js', 'preload.js', '.md'];
-    if (rawPath.startsWith('/.') || blockedPatterns.some(pat => rawPath.includes(pat))) {
-      console.warn(`[Security] Blocked unauthorized file access attempt: ${req.path}`);
-      return res.status(403).send('Forbidden');
-    }
-    next();
-  });
+    // Block access to sensitive files (.env, credentials, source code, configs)
+    app.use((req, res, next) => {
+      const rawPath = (req.path || '').toLowerCase();
+      const blockedPatterns = ['.env', '.git', '.lock', '.json', '.py', 'main.js', 'preload.js', '.md'];
+      if (rawPath.startsWith('/.') || blockedPatterns.some(pat => rawPath.includes(pat))) {
+        console.warn(`[Security] Blocked unauthorized file access attempt: ${req.path}`);
+        return res.status(403).send('Forbidden');
+      }
+      next();
+    });
 
-  app.use(express.static(__dirname, {
-    dotfiles: 'deny',
-    index: ['index.html']
-  }));
+    app.use(express.static(__dirname, {
+      dotfiles: 'deny',
+      index: ['index.html']
+    }));
 
-  server = http.createServer(app);
-  // Bind ONLY to loopback 127.0.0.1 to avoid network exposure
-  server.listen(port, '127.0.0.1', () => {
-    console.log(`[Main] Local JARVIS Server bound securely to http://127.0.0.1:${port}`);
+    const tryListen = (portToTry) => {
+      const srv = http.createServer(app);
+
+      srv.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          console.warn(`[Main] Port ${portToTry} is in use, attempting fallback port ${portToTry + 1}...`);
+          tryListen(portToTry + 1);
+        } else {
+          console.error('[Main] Server error:', err);
+        }
+      });
+
+      srv.listen(portToTry, '127.0.0.1', () => {
+        server = srv;
+        activePort = portToTry;
+        console.log(`[Main] Local JARVIS Server bound securely to http://127.0.0.1:${activePort}`);
+        resolve(activePort);
+      });
+    };
+
+    tryListen(preferredPort);
   });
 }
 
@@ -165,7 +184,7 @@ function createWindow() {
     show: false,
   });
 
-  mainWindow.loadURL('http://localhost:3000/index.html');
+  mainWindow.loadURL(`http://127.0.0.1:${activePort}/index.html`);
 
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     const levels = ['DEBUG', 'INFO', 'WARN', 'ERROR'];
@@ -173,8 +192,8 @@ function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    console.log("[Main] Window ready, starting in SLEEP mode (hidden).");
-    // mainWindow.show(); // Removed to start hidden
+    console.log("[Main] Window ready, displaying JARVIS HUD.");
+    mainWindow.show();
   });
 
   ipcMain.on('wake-up', () => {
@@ -231,12 +250,21 @@ app.whenReady().then(async () => {
     return true;
   });
 
-  startLocalServer();
+  await startLocalServer();
   createWindow();
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  if (server) {
+    try {
+      server.close();
+      console.log('[Main] Local server closed cleanly.');
+    } catch (e) {}
+  }
 });
 
 app.on('activate', () => {
