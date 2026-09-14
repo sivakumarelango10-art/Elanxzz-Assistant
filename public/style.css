@@ -423,3 +423,60 @@ input:checked + .slider:before {
   transform: translateX(18px);
   background-color: var(--bright);
 }
+
+/* ── Directive Input Panel ── */
+.directive-panel {
+  margin-top: 6px;
+  padding: 8px 12px;
+}
+
+.directive-form {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  align-items: center;
+}
+
+#directive-input {
+  flex: 1;
+  background: rgba(0, 24, 48, 0.7);
+  border: 1px solid rgba(0, 180, 255, 0.4);
+  color: #00d4ff;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  border-radius: 2px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  letter-spacing: 0.5px;
+}
+
+#directive-input::placeholder {
+  color: rgba(0, 180, 255, 0.4);
+}
+
+#directive-input:focus {
+  border-color: #00d4ff;
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
+  background: rgba(0, 32, 64, 0.85);
+}
+
+#directive-send-btn {
+  background: rgba(0, 180, 255, 0.15);
+  border: 1px solid #00b4ff;
+  color: #00d4ff;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+#directive-send-btn:hover {
+  background: rgba(0, 180, 255, 0.4);
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
+  color: #ffffff;
+}

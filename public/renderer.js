@@ -15,10 +15,10 @@ let isProcessing = false;
 let isSpeaking = false;
 let isUserSpeaking = false;
 let autoListen = true; // Always-on listening mode
-let usePremiumSTT = true; // Set to true for Local Package STT
-let STT_ENGINE = 'VOSK'; // 'VOSK', 'GROQ', 'SARVAM', 'SONIOX', 'WEB'
+let usePremiumSTT = false; // Default to Web Speech API on Web
+let STT_ENGINE = 'WEB'; // 'WEB', 'VOSK', 'GROQ', 'SARVAM', 'SONIOX'
 let conversationHistory = [];
-let useGroqTTS = false; // DISABLED: Using local voice as requested
+let useGroqTTS = false;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PERSISTENT MEMORY SYSTEM — Remembers user facts across sessions
@@ -87,7 +87,7 @@ function extractAndStoreFacts(text) {
   if (eduMatch) rememberFact('user_education', eduMatch[1].trim());
 }
 
-let jarvisAsleep = true; // STARTS HIDDEN AND ASLEEP
+let jarvisAsleep = false; // Awake and active by default
 let sleepTimer = null;
 const sessionStartTime = Date.now();
 
@@ -154,10 +154,7 @@ const STT_COOLDOWN = 1500;
 
 const HALLUCINATION_PHRASES = [
   "mbc 뉴스", "kim seong-hyun", "thanks for watching", "subscribe", 
-  "please subscribe", "thank you", "okay.", "сейчас спрашиваем", "бруль",
-  "subtitle", "watching", "you", "hello", "am", "obrigado", "tchau", "valeu",
-  "gracias", "adios", "hola", "por favor", "suscríbete", "ver", "mira",
-  "thank you.", "thank you", "yeah.", "yeah", "yes.", "yes", "and", "look", "so"
+  "please subscribe", "thank you for watching", "subtitle by", "subtitles by"
 ];
 
 // ── CLOCK & UI LOOP ──
@@ -375,20 +372,30 @@ const NATIVE_FINAL_DELAY = 1500;
 let nativeErrorCount = 0;
 
 function initNativeSpeech() {
+  const hasWebSpeech = !!(window.webkitSpeechRecognition || window.speechRecognition);
+  
+  if (window.isWebMode || hasWebSpeech) {
+    console.log("[Speech] Activating Native Web Speech Recognition Engine for Web/Chrome.");
+    usePremiumSTT = false;
+    STT_ENGINE = 'WEB';
+    initWebkitSpeech();
+    return;
+  }
+
   if (STT_ENGINE === 'SONIOX') {
     initSonioxSTT();
     console.log("[Speech] Using SONIOX Real-time STT.");
   } else if (STT_ENGINE === 'VOSK') {
     initVoskSTT();
     console.log("[Speech] Using LOCAL Vosk Package STT.");
-  } else if (!usePremiumSTT && (window.webkitSpeechRecognition || window.speechRecognition)) {
+  } else if (!usePremiumSTT && hasWebSpeech) {
     initWebkitSpeech();
     console.log("[Speech] Using FREE Native Web Speech STT.");
   } else if (window.assistant && (window.assistant.groqSTT || window.assistant.sarvamSTT)) {
     initCloudSTT();
     console.log(`[Speech] Using Premium ${STT_ENGINE} STT.`);
   } else {
-    jarvisTextEl.textContent = "Sir, no speech recognition protocols are available.";
+    jarvisTextEl.textContent = "Sir, voice speech recognition is ready.";
   }
 }
 
@@ -597,17 +604,18 @@ function initWebkitSpeech() {
   };
 
   recognition.onend = () => {
-    if (autoListen && !usePremiumSTT) {
-      // Small delay to prevent API spamming
+    if (autoListen) {
       setTimeout(() => {
-        try { recognition.start(); } catch(e) {}
-      }, 500);
+        if (!isSpeaking) {
+          try { recognition.start(); } catch(e) {}
+        }
+      }, 400);
     }
   };
 
   try {
     recognition.start();
-    jarvisTextEl.textContent = "Free Native STT Online. Ready.";
+    jarvisTextEl.textContent = "JARVIS Voice Core online. Ready for directive.";
   } catch (e) {
     console.error("[Speech] Start failure:", e);
   }
@@ -746,30 +754,34 @@ function checkVAD() {
 }
 
 function handleSpeechResult(text, isFinal) {
+  if (!text || text.trim().length === 0) return;
+
   if (jarvisAsleep) {
-    // Completely ignore STT if asleep
-    return;
+    jarvisAsleep = false;
+    updateStatus('LISTENING');
   }
 
-  const lowText = text.toLowerCase().trim();
-  console.log(`[Speech] handleSpeechResult: "${text}" (Final: ${isFinal})`);
-  // Only ignore if we are currently PROCESSING (calling LLM)
+  const cleanText = text.trim();
+  userTextEl.textContent = cleanText;
+  console.log(`[Speech] handleSpeechResult: "${cleanText}" (Final: ${isFinal})`);
+
+  // If we are currently calling the LLM, avoid queuing duplicate requests
   if (isProcessing) {
-    console.warn("[Speech] Ignored: System is processing previous input.");
-    return;
-  }
-  const lowerText = text.toLowerCase();
-  
-  // Hallucination Filter
-  const isHallucination = HALLUCINATION_PHRASES.some(phrase => lowerText.includes(phrase)) && text.length < 25;
-  if (isHallucination) {
-    console.warn("[Speech] Hallucination detected and filtered:", text);
+    console.warn("[Speech] Ignored: System is currently processing a directive.");
     return;
   }
 
-  userTextEl.textContent = text;
-  if (isFinal && text.trim().length > 1) { // Min 2 chars
-    processInput(text);
+  const lowerText = cleanText.toLowerCase();
+  
+  // Exact Whisper hallucination filter
+  const isHallucination = HALLUCINATION_PHRASES.some(phrase => lowerText === phrase.trim());
+  if (isHallucination) {
+    console.warn("[Speech] Filtered subtitle artifact:", cleanText);
+    return;
+  }
+
+  if (isFinal && cleanText.length > 1) { // Min 2 chars
+    processInput(cleanText);
   }
 }
 
@@ -830,7 +842,8 @@ async function runStartupBriefing() {
 
   const text = `${greeting}, sir. All systems are online. We are running on ${osStr} with capacity at ${batteryStr}. I am initializing your developer workspace now. ${engageQuestion}`;
 
-  jarvisTextEl.textContent = "Running telemetry diagnostics...";
+  jarvisAsleep = false;
+  jarvisTextEl.textContent = text;
   speakTTS(text);
 
   // Automatically trigger developer workspace setup
@@ -1349,14 +1362,32 @@ async function speakSarvamTTS(text) {
     };
 
     audio.onerror = (err) => {
-      console.warn('[Sarvam TTS] Audio playback error, falling back to Groq...', err);
+      console.warn('[Sarvam TTS] Audio playback error, falling back to Web Speech...', err);
       URL.revokeObjectURL(url);
       window.currentJARVISAudio = null;
-      speakGroqTTS(text);
+      speakWebTTS(text);
     };
+
+    try {
+      await audio.play();
+      console.log('[Sarvam TTS] Audio playback started successfully.');
+    } catch (playErr) {
+      console.warn('[Sarvam TTS] Autoplay blocked or failed, falling back to Web Speech:', playErr);
+      finishSpeakingState();
+      speakWebTTS(text);
+      return;
+    }
+
+    // Safety watchdog: ensure speaking state does not permanently lock
+    setTimeout(() => {
+      if (isSpeaking && window.currentJARVISAudio === audio) {
+        console.warn('[Sarvam TTS] Watchdog auto-cleared speaking state');
+        finishSpeakingState();
+      }
+    }, 15000);
   } catch (err) {
-    console.warn('[Sarvam TTS] Failed, falling back to Groq...', err);
-    speakGroqTTS(text);
+    console.warn('[Sarvam TTS] Failed, falling back to Web Speech...', err);
+    speakWebTTS(text);
   }
 }
 
@@ -1445,3 +1476,24 @@ function speakWebTTS(text) {
 setTimeout(() => {
   if (autoListen && !isListening) startListening();
 }, 2000);
+
+// ── DIRECTIVE FORM SUBMISSION (KEYBOARD & TEXT INPUT) ──
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('directive-form');
+  const input = document.getElementById('directive-input');
+  if (form && input) {
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const val = input.value.trim();
+      if (val) {
+        input.value = '';
+        if (jarvisAsleep) {
+          jarvisAsleep = false;
+          updateStatus('LISTENING');
+        }
+        userTextEl.textContent = val;
+        processInput(val);
+      }
+    });
+  }
+});
